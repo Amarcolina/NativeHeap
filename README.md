@@ -13,7 +13,7 @@ Two comparators are included, the Min and Max comparator, which are able to cons
 ### Example Usage
 
 Basic example
-```
+```csharp
 //Construct a new MinHeap for integers
 NativeHeap<int, Min> heap = new NativeHeap(Allocator.Temp);
 
@@ -31,7 +31,7 @@ heap.Dispose();
 ```
 
 Custom comparator example
-```
+```csharp
 //Define a custom comparator that orders floats by their distance to the 
 //constant 100
 public struct DistanceTo100 : IComparer<float> {
@@ -47,7 +47,7 @@ NativeHeap<float, DistanceTo100> heap = new NativeHeap(Allocator.Temp);
 ```
 
 Using an `Index` to remove an item
-```
+```csharp
 NativeHeap<int, Min> heap = new NativeHeap(Allocator.Temp);
 
 heap.Insert(5);
