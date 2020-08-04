@@ -59,7 +59,7 @@ namespace Unity.Collections {
 #if NHEAP_SAFE
                 return true;
 #else
-            return false;
+                return false;
 #endif
             }
         }
@@ -445,9 +445,17 @@ namespace Unity.Collections {
 
         internal NativeHeap(int initialCapacity, U comparator, Allocator allocator, int disposeSentinelStackDepth) {
 #if NHEAP_SAFE
-            //TODO: more checks
-            DisposeSentinel.Create(out m_Safety, out m_DisposeSentinel, disposeSentinelStackDepth, allocator);
+            if (initialCapacity <= 0) {
+                throw new ArgumentException(nameof(initialCapacity), "Must provide an initial capacity that is greater than zero.");
+            }
 
+            if (allocator == Allocator.None ||
+                allocator == Allocator.Invalid ||
+                allocator == Allocator.AudioKernel) {
+                throw new ArgumentException(nameof(allocator), "Must provide an Allocator type of Temp, TempJob, or Persistent.");
+            }
+
+            DisposeSentinel.Create(out m_Safety, out m_DisposeSentinel, disposeSentinelStackDepth, allocator);
             _id = Interlocked.Increment(ref _nextId);
 #endif
 
