@@ -67,3 +67,8 @@ print(heap.Pop()); //10
 
 heap.Dispose();
 ```
+### How To Use It?
+NativeHeap is a self-contained data structure with no dependencies, and so you can just copy NativeHeap.cs into your project and start working! Just a few considerations:
+ - NativeHeap uses unsafe code, so make sure it is enabled in your project, or that NativeHeap is placed under the care of an Asmdef with unsafe code enabled.
+ - You can optionally copy over the provided Min.cs and Max.cs to get a set of default comparators for built-in scalar types like int and float.
+ - NativeHeap has no private members, only internal members, so if you are wary of using an unsafe method by accident just wrap the NativeHeap inside an Asmdef so that the internals are not exposed.
