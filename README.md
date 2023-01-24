@@ -19,7 +19,7 @@ Two comparators are included, the Min and Max comparator, which are able to cons
 Basic example
 ```csharp
 //Construct a new MinHeap for integers
-NativeHeap<int, Min> heap = new NativeHeap(Allocator.Temp);
+var heap = new NativeHeap<int, Min>(Allocator.Temp);
 
 //Insert some numbers into the heap
 heap.Insert(5);
@@ -46,13 +46,13 @@ public struct DistanceTo100 : IComparer<float> {
     }
 }
 
-NativeHeap<float, DistanceTo100> heap = new NativeHeap(Allocator.Temp);
+var heap = new NativeHeap<float, DistanceTo100>(Allocator.Temp);
 ...
 ```
 
 Using an `Index` to remove an item
 ```csharp
-NativeHeap<int, Min> heap = new NativeHeap(Allocator.Temp);
+var heap = new NativeHeap<int, Min>(Allocator.Temp);
 
 heap.Insert(5);
 heap.Insert(3);
