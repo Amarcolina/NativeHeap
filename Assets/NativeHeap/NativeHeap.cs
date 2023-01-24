@@ -229,7 +229,7 @@ namespace Unity.Collections {
 
             switch (errorCode) {
                 case VALIDATION_ERROR_WRONG_INSTANCE:
-                    throw new ArgumentException("The provided ItemHandle was not valid for this NativeHeap.  " + 
+                    throw new ArgumentException("The provided ItemHandle was not valid for this NativeHeap.  " +
                                                 "It was taken from a different instance.");
                 case VALIDATION_ERROR_INVALID:
                     throw new ArgumentException("The provided ItemHandle was not valid for this NativeHeap.");
@@ -438,20 +438,20 @@ namespace Unity.Collections {
         internal const int VALIDATION_ERROR_REMOVED = 3;
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-        internal static int NextId = 1;
-        internal int Id;
+        internal unsafe static int NextId = 1;
+        internal unsafe int Id;
 
-        internal AtomicSafetyHandle m_Safety;
+        internal unsafe AtomicSafetyHandle m_Safety;
 
         [NativeSetClassTypeToNullOnSchedule]
-        DisposeSentinel m_DisposeSentinel;
+        internal unsafe DisposeSentinel m_DisposeSentinel;
 #endif
 
         [NativeDisableUnsafePtrRestriction]
         internal unsafe HeapData<T, U>* Data;
-        internal Allocator Allocator;
+        internal unsafe Allocator Allocator;
 
-        internal NativeHeap(int initialCapacity, U comparator, Allocator allocator, int disposeSentinelStackDepth) {
+        internal unsafe NativeHeap(int initialCapacity, U comparator, Allocator allocator, int disposeSentinelStackDepth) {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             if (initialCapacity <= 0) {
                 throw new ArgumentException(nameof(initialCapacity), "Must provide an initial capacity that is greater than zero.");
@@ -467,129 +467,121 @@ namespace Unity.Collections {
             Id = Interlocked.Increment(ref NextId);
 #endif
 
-            unsafe {
-                Data = (HeapData<T, U>*)Malloc(SizeOf<HeapData<T, U>>(), AlignOf<HeapData<T, U>>(), allocator);
-                Data->Heap = (HeapNode<T>*)Malloc(SizeOf<HeapNode<T>>() * initialCapacity, AlignOf<HeapNode<T>>(), allocator);
-                Data->Table = (TableValue*)Malloc(SizeOf<TableValue>() * initialCapacity, AlignOf<TableValue>(), allocator);
+            Data = (HeapData<T, U>*)Malloc(SizeOf<HeapData<T, U>>(), AlignOf<HeapData<T, U>>(), allocator);
+            Data->Heap = (HeapNode<T>*)Malloc(SizeOf<HeapNode<T>>() * initialCapacity, AlignOf<HeapNode<T>>(), allocator);
+            Data->Table = (TableValue*)Malloc(SizeOf<TableValue>() * initialCapacity, AlignOf<TableValue>(), allocator);
 
-                Allocator = allocator;
+            Allocator = allocator;
 
-                for (int i = 0; i < initialCapacity; i++) {
-                    Data->Heap[i] = new HeapNode<T>() {
-                        TableIndex = i
-                    };
+            for (int i = 0; i < initialCapacity; i++) {
+                Data->Heap[i] = new HeapNode<T>() {
+                    TableIndex = i
+                };
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-                    Data->Table[i] = new TableValue() {
-                        Version = 1
-                    };
+                Data->Table[i] = new TableValue() {
+                    Version = 1
+                };
 #endif
-                }
-
-                Data->Count = 0;
-                Data->Capacity = initialCapacity;
-                Data->Comparator = comparator;
             }
+
+            Data->Count = 0;
+            Data->Capacity = initialCapacity;
+            Data->Comparator = comparator;
         }
 
-        internal void InsertAndBubbleDown(HeapNode<T> node, int insertIndex) {
-            unsafe {
-                while (true) {
-                    int indexL = insertIndex * 2 + 1;
-                    int indexR = insertIndex * 2 + 2;
+        internal unsafe void InsertAndBubbleDown(HeapNode<T> node, int insertIndex) {
+            while (true) {
+                int indexL = insertIndex * 2 + 1;
+                int indexR = insertIndex * 2 + 2;
 
-                    //If the left index is off the end, we are finished
-                    if (indexL >= Data->Count) {
+                //If the left index is off the end, we are finished
+                if (indexL >= Data->Count) {
+                    break;
+                }
+
+                if (indexR >= Data->Count || Data->Comparator.Compare(Data->Heap[indexL].Item,
+                                                                        Data->Heap[indexR].Item) <= 0) {
+                    //left is smaller (or the only child)
+                    var leftNode = Data->Heap[indexL];
+
+                    if (Data->Comparator.Compare(node.Item, leftNode.Item) <= 0) {
+                        //Last is smaller or equal to left, we are done
                         break;
                     }
 
-                    if (indexR >= Data->Count || Data->Comparator.Compare(Data->Heap[indexL].Item,
-                                                                          Data->Heap[indexR].Item) <= 0) {
-                        //left is smaller (or the only child)
-                        var leftNode = Data->Heap[indexL];
+                    Data->Heap[insertIndex] = leftNode;
+                    Data->Table[leftNode.TableIndex].HeapIndex = insertIndex;
+                    insertIndex = indexL;
+                } else {
+                    //right is smaller
+                    var rightNode = Data->Heap[indexR];
 
-                        if (Data->Comparator.Compare(node.Item, leftNode.Item) <= 0) {
-                            //Last is smaller or equal to left, we are done
-                            break;
-                        }
-
-                        Data->Heap[insertIndex] = leftNode;
-                        Data->Table[leftNode.TableIndex].HeapIndex = insertIndex;
-                        insertIndex = indexL;
-                    } else {
-                        //right is smaller
-                        var rightNode = Data->Heap[indexR];
-
-                        if (Data->Comparator.Compare(node.Item, rightNode.Item) <= 0) {
-                            //Last is smaller than or equal to right, we are done
-                            break;
-                        }
-
-                        Data->Heap[insertIndex] = rightNode;
-                        Data->Table[rightNode.TableIndex].HeapIndex = insertIndex;
-                        insertIndex = indexR;
-                    }
-                }
-
-                Data->Heap[insertIndex] = node;
-                Data->Table[node.TableIndex].HeapIndex = insertIndex;
-            }
-        }
-
-        internal void InsertAndBubbleUp(HeapNode<T> node, int insertIndex) {
-            unsafe {
-                while (insertIndex != 0) {
-                    int parentIndex = (insertIndex - 1) / 2;
-                    var parentNode = Data->Heap[parentIndex];
-
-                    //If parent is actually less or equal to us, we are ok and can break out
-                    if (Data->Comparator.Compare(parentNode.Item, node.Item) <= 0) {
+                    if (Data->Comparator.Compare(node.Item, rightNode.Item) <= 0) {
+                        //Last is smaller than or equal to right, we are done
                         break;
                     }
 
-                    //We need to swap parent down
-                    Data->Heap[insertIndex] = parentNode;
-                    //Update table to point to new heap index
-                    Data->Table[parentNode.TableIndex].HeapIndex = insertIndex;
+                    Data->Heap[insertIndex] = rightNode;
+                    Data->Table[rightNode.TableIndex].HeapIndex = insertIndex;
+                    insertIndex = indexR;
+                }
+            }
 
-                    //Restart loop trying to insert at parent index
-                    insertIndex = parentIndex;
+            Data->Heap[insertIndex] = node;
+            Data->Table[node.TableIndex].HeapIndex = insertIndex;
+        }
+
+        internal unsafe void InsertAndBubbleUp(HeapNode<T> node, int insertIndex) {
+            while (insertIndex != 0) {
+                int parentIndex = (insertIndex - 1) / 2;
+                var parentNode = Data->Heap[parentIndex];
+
+                //If parent is actually less or equal to us, we are ok and can break out
+                if (Data->Comparator.Compare(parentNode.Item, node.Item) <= 0) {
+                    break;
                 }
 
-                Data->Heap[insertIndex] = node;
-                Data->Table[node.TableIndex].HeapIndex = insertIndex;
+                //We need to swap parent down
+                Data->Heap[insertIndex] = parentNode;
+                //Update table to point to new heap index
+                Data->Table[parentNode.TableIndex].HeapIndex = insertIndex;
+
+                //Restart loop trying to insert at parent index
+                insertIndex = parentIndex;
             }
+
+            Data->Heap[insertIndex] = node;
+            Data->Table[node.TableIndex].HeapIndex = insertIndex;
         }
 
         [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
-        internal void IsValidIndexInternal(NativeHeapIndex index, ref bool result, ref int errorCode) {
-            unsafe {
-                AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+        internal unsafe void IsValidIndexInternal(NativeHeapIndex index, ref bool result, ref int errorCode) {
+            AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 
-                if (index.StructureId != Id) {
-                    errorCode = VALIDATION_ERROR_WRONG_INSTANCE;
-                    result = false;
-                    return;
-                }
+            if (index.StructureId != Id) {
+                errorCode = VALIDATION_ERROR_WRONG_INSTANCE;
+                result = false;
+                return;
+            }
 
-                if (index.TableIndex >= Data->Capacity) {
-                    errorCode = VALIDATION_ERROR_INVALID;
-                    result = false;
-                    return;
-                }
+            if (index.TableIndex >= Data->Capacity) {
+                errorCode = VALIDATION_ERROR_INVALID;
+                result = false;
+                return;
+            }
 
-                TableValue tableValue = Data->Table[index.TableIndex];
-                if (tableValue.Version != index.Version) {
-                    errorCode = VALIDATION_ERROR_REMOVED;
-                    result = false;
-                    return;
-                }
+            TableValue tableValue = Data->Table[index.TableIndex];
+            if (tableValue.Version != index.Version) {
+                errorCode = VALIDATION_ERROR_REMOVED;
+                result = false;
+                return;
             }
         }
 
         #endregion
     }
 
-    internal class NativeHeapDebugView<T, U>
+    internal unsafe class NativeHeapDebugView<T, U>
         where T : unmanaged
         where U : unmanaged, IComparer<T> {
 
@@ -617,7 +609,7 @@ namespace Unity.Collections {
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct TableValue {
+    internal unsafe struct TableValue {
         public int HeapIndex;
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
         public int Version;
@@ -625,7 +617,7 @@ namespace Unity.Collections {
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct HeapData<T, U>
+    internal unsafe struct HeapData<T, U>
         where T : unmanaged {
         public int Count;
         public int Capacity;
@@ -635,7 +627,7 @@ namespace Unity.Collections {
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct HeapNode<T>
+    internal unsafe struct HeapNode<T>
         where T : unmanaged {
         public T Item;
         public int TableIndex;
