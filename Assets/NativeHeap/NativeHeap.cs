@@ -131,6 +131,10 @@ namespace Unity.Collections {
             }
         }
 
+        /// <summary>
+        /// Gets or sets the comparator used for this Heap. Note that you can only set the comparator
+        /// when the Heap is empty.
+        /// </summary>
         public U Comparator {
             get {
                 unsafe {
@@ -144,10 +148,11 @@ namespace Unity.Collections {
                 unsafe {
 #if NHEAP_SAFE
                     AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
-#endif
+
                     if (_data->Count != 0) {
                         throw new InvalidOperationException("Can only change the comparator of a NativeHeap when it is empty.");
                     }
+#endif
                     _data->Comparator = value;
                 }
             }
