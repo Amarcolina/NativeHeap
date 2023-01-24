@@ -26,7 +26,7 @@ namespace Unity.Collections {
     /// to extract the min/max from the container with a O(log(n)) cost per item.
     /// 
     /// This implementation provides the ability to remove items from the middle of the container
-    /// as well.  This is a critical operation when implementing algorithms like astar.  When an
+    /// as well.  This is a critical operation when implementing algorithms like a-star.  When an
     /// item is added to the container, an index is returned which can be used to later remove
     /// the item no matter where it is in the heap, for the same cost of removing it if it was
     /// popped normally.
@@ -37,7 +37,7 @@ namespace Unity.Collections {
     /// operation.  This allows you to use the comparator to parameterize this collection into a 
     /// MinHeap, MaxHeap, or other type of ordered heap using your own custom type.
     /// 
-    /// For convinience, this library contains the Min and Max comparator, which provide
+    /// For convenience, this library contains the Min and Max comparator, which provide
     /// comparisons for all built in primitives.
     /// </summary>
     [NativeContainer]
@@ -131,6 +131,28 @@ namespace Unity.Collections {
             }
         }
 
+        public U Comparator {
+            get {
+                unsafe {
+#if NHEAP_SAFE
+                    AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+#endif
+                    return _data->Comparator;
+                }
+            }
+            set {
+                unsafe {
+#if NHEAP_SAFE
+                    AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
+#endif
+                    if (_data->Count != 0) {
+                        throw new InvalidOperationException("Can only change the comparator of a NativeHeap when it is empty.");
+                    }
+                    _data->Comparator = value;
+                }
+            }
+        }
+
         /// <summary>
         /// Constructs a new NativeHeap using the given Allocator.  You must call Dispose on this collection
         /// when you are finished with it.
@@ -140,7 +162,7 @@ namespace Unity.Collections {
         /// </param>
         /// <param name="initialCapacity">
         /// You can optionally specify the default number of elements this collection can contain before the internal
-        /// data structures need to be realoocated.
+        /// data structures need to be re-allocated.
         /// </param>
         /// <param name="comparator">
         /// You can optionally specify the comparator used to order the elements in this collection.  The Pop operation will
@@ -163,9 +185,9 @@ namespace Unity.Collections {
                 _data->Count = 0;
                 _data->Capacity = 0;
 
-                UnsafeUtility.Free(_data->Heap, _allocator);
-                UnsafeUtility.Free(_data->Table, _allocator);
-                UnsafeUtility.Free(_data, _allocator);
+                Free(_data->Heap, _allocator);
+                Free(_data->Table, _allocator);
+                Free(_data, _allocator);
             }
         }
 
@@ -411,7 +433,7 @@ namespace Unity.Collections {
                 if (indexToRemove != 0) {
                     int parentIndex = (indexToRemove - 1) / 2;
                     var parentNode = ReadArrayElement<HeapNode>(_data->Heap, parentIndex);
-                    if (_comparator.Compare(lastNode.Item, parentNode.Item) < 0) {
+                    if (_data->Comparator.Compare(lastNode.Item, parentNode.Item) < 0) {
                         InsertAndBubbleUp(lastNode, indexToRemove);
                         return toRemove.Item;
                     }
@@ -439,9 +461,8 @@ namespace Unity.Collections {
 #endif
 
         [NativeDisableUnsafePtrRestriction]
-        private unsafe HeapData* _data;
+        private unsafe HeapData<U>* _data;
         private Allocator _allocator;
-        private U _comparator;
 
         internal NativeHeap(int initialCapacity, U comparator, Allocator allocator, int disposeSentinelStackDepth) {
 #if NHEAP_SAFE
@@ -460,7 +481,7 @@ namespace Unity.Collections {
 #endif
 
             unsafe {
-                _data = (HeapData*)Malloc(SizeOf<HeapData>(), AlignOf<HeapData>(), allocator);
+                _data = (HeapData<U>*)Malloc(SizeOf<HeapData<U>>(), AlignOf<HeapData<U>>(), allocator);
                 _data->Heap = (void*)Malloc(SizeOf<HeapNode>() * initialCapacity, AlignOf<HeapNode>(), allocator);
                 _data->Table = (TableValue*)Malloc(SizeOf<TableValue>() * initialCapacity, AlignOf<TableValue>(), allocator);
 
@@ -479,7 +500,7 @@ namespace Unity.Collections {
 
                 _data->Count = 0;
                 _data->Capacity = initialCapacity;
-                _comparator = comparator;
+                _data->Comparator = comparator;
             }
         }
 
@@ -494,12 +515,12 @@ namespace Unity.Collections {
                         break;
                     }
 
-                    if (indexR >= _data->Count || _comparator.Compare(ReadArrayElement<HeapNode>(_data->Heap, indexL).Item,
+                    if (indexR >= _data->Count || _data->Comparator.Compare(ReadArrayElement<HeapNode>(_data->Heap, indexL).Item,
                                                                       ReadArrayElement<HeapNode>(_data->Heap, indexR).Item) <= 0) {
                         //left is smaller (or the only child)
                         var leftNode = ReadArrayElement<HeapNode>(_data->Heap, indexL);
 
-                        if (_comparator.Compare(node.Item, leftNode.Item) <= 0) {
+                        if (_data->Comparator.Compare(node.Item, leftNode.Item) <= 0) {
                             //Last is smaller or equal to left, we are done
                             break;
                         }
@@ -511,7 +532,7 @@ namespace Unity.Collections {
                         //right is smaller
                         var rightNode = ReadArrayElement<HeapNode>(_data->Heap, indexR);
 
-                        if (_comparator.Compare(node.Item, rightNode.Item) <= 0) {
+                        if (_data->Comparator.Compare(node.Item, rightNode.Item) <= 0) {
                             //Last is smaller than or equal to right, we are done
                             break;
                         }
@@ -534,12 +555,12 @@ namespace Unity.Collections {
                     var parentNode = ReadArrayElement<HeapNode>(_data->Heap, parentIndex);
 
                     //If parent is actually less or equal to us, we are ok and can break out
-                    if (_comparator.Compare(parentNode.Item, node.Item) <= 0) {
+                    if (_data->Comparator.Compare(parentNode.Item, node.Item) <= 0) {
                         break;
                     }
 
                     //We need to swap parent down
-                    WriteArrayElement<HeapNode>(_data->Heap, insertIndex, parentNode);
+                    WriteArrayElement(_data->Heap, insertIndex, parentNode);
                     //Update table to point to new heap index
                     _data->Table[parentNode.TableIndex].HeapIndex = insertIndex;
 
@@ -569,10 +590,11 @@ namespace Unity.Collections {
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct HeapData {
+    internal struct HeapData<U> {
         public int Count;
         public int Capacity;
         public unsafe void* Heap;
         public unsafe TableValue* Table;
+        public U Comparator;
     }
 }
