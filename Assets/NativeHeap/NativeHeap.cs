@@ -1,7 +1,4 @@
-﻿#if ENABLE_UNITY_COLLECTIONS_CHECKS
-#define NHEAP_SAFE
-#endif
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -14,7 +11,7 @@ namespace Unity.Collections {
 
     public struct NativeHeapIndex {
         internal int TableIndex;
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
         internal int Version;
         internal int StructureId;
 #endif
@@ -53,26 +50,13 @@ namespace Unity.Collections {
         public const int DEFAULT_CAPACITY = 128;
 
         /// <summary>
-        /// Returns whether or not the NativeHeap structure is currently using safety checks.
-        /// </summary>
-        public static bool IsUsingSafetyChecks {
-            get {
-#if NHEAP_SAFE
-                return true;
-#else
-                return false;
-#endif
-            }
-        }
-
-        /// <summary>
         /// Returns the number of elements that this collection can hold before the internal structures
         /// need to be reallocated.
         /// </summary>
         public int Capacity {
             get {
                 unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                     AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
                     return Data->Capacity;
@@ -80,7 +64,7 @@ namespace Unity.Collections {
             }
             set {
                 unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                     AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
                     if (value < Data->Count) {
                         throw new ArgumentException($"Capacity of {value} cannot be smaller than count of {Data->Count}.");
@@ -99,7 +83,7 @@ namespace Unity.Collections {
                             TableIndex = i + Data->Capacity
                         };
 
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                         //For each new table value, make sure it has a specific version
                         newTable[i + Data->Capacity] = new TableValue() {
                             Version = 1
@@ -124,7 +108,7 @@ namespace Unity.Collections {
         public int Count {
             get {
                 unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                     AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
                     return Data->Count;
@@ -139,7 +123,7 @@ namespace Unity.Collections {
         public U Comparator {
             get {
                 unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                     AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
                     return Data->Comparator;
@@ -147,7 +131,7 @@ namespace Unity.Collections {
             }
             set {
                 unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                     AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 
                     if (Data->Count != 0) {
@@ -184,7 +168,7 @@ namespace Unity.Collections {
         /// </summary>
         public void Dispose() {
             unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                 DisposeSentinel.Dispose(ref m_Safety, ref m_DisposeSentinel);
 #endif
 
@@ -203,7 +187,7 @@ namespace Unity.Collections {
         /// </summary>
         public void Clear() {
             unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 
                 for (int i = 0; i < Data->Count; i++) {
@@ -220,44 +204,39 @@ namespace Unity.Collections {
         /// Returns whether or not the given NativeHeapIndex is a valid index for this container.  If true,
         /// that index can be used to Remove the element tied to that index from the container.
         /// 
-        /// This method will always return true if IsUsingSafetyChecks returns false.
+        /// This method will always return true if Unity safety checks is turned off.
         /// </summary>
         public bool IsValidIndex(NativeHeapIndex index) {
-            return IsValidIndex(index, out _);
+            var isValid = true;
+            var errorCode = 0;
+            IsValidIndexInternal(index, ref isValid, ref errorCode);
+            return isValid;
         }
 
         /// <summary>
-        /// Returns whether or not the given NativeHeapIndex is a valid index for this container.  If true,
-        /// that index can be used to Remove the element tied to that index from the container.
+        /// Throws an ArgumentException if the provided NativeHeapIndex is not valid for this container.
         /// 
-        /// This method will always return true if IsUsingSafetyChecks returns false.
+        /// This method will never throw if Unity safety checks is turned off.
         /// </summary>
-        public bool IsValidIndex(NativeHeapIndex index, out string error) {
-            error = null;
-
-#if NHEAP_SAFE
-            unsafe {
-                AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
-
-                if (index.StructureId != Id) {
-                    error = "The provided ItemHandle was not valid for this NativeHeap.  It was taken from a different instance.";
-                    return false;
-                }
-
-                if (index.TableIndex >= Data->Capacity) {
-                    error = "The provided ItemHandle was not valid for this NativeHeap.";
-                    return false;
-                }
-
-                TableValue tableValue = Data->Table[index.TableIndex];
-                if (tableValue.Version != index.Version) {
-                    error = "The provided ItemHandle was not valid for this NativeHeap.  The item it pointed to might have already been removed.";
-                    return false;
-                }
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        public void AssertValidIndex(NativeHeapIndex index) {
+            var isValid = true;
+            var errorCode = 0;
+            IsValidIndexInternal(index, ref isValid, ref errorCode);
+            if (isValid) {
+                return;
             }
-#endif
 
-            return true;
+            switch (errorCode) {
+                case VALIDATION_ERROR_WRONG_INSTANCE:
+                    throw new ArgumentException("The provided ItemHandle was not valid for this NativeHeap.  " + 
+                                                "It was taken from a different instance.");
+                case VALIDATION_ERROR_INVALID:
+                    throw new ArgumentException("The provided ItemHandle was not valid for this NativeHeap.");
+                case VALIDATION_ERROR_REMOVED:
+                    throw new ArgumentException("The provided ItemHandle was not valid for this NativeHeap.  " +
+                                                "The item it pointed to might have already been removed.");
+            }
         }
 
         /// <summary>
@@ -269,7 +248,7 @@ namespace Unity.Collections {
         /// This method will throw an InvalidOperationException if the collection is empty.
         /// </summary>
         public T Peek() {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
             AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
 
@@ -290,7 +269,7 @@ namespace Unity.Collections {
         /// </summary>
         public bool TryPeek(out T t) {
             unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
 
@@ -314,7 +293,7 @@ namespace Unity.Collections {
         /// This method will throw an InvalidOperationException if the collection is empty.
         /// </summary>
         public T Pop() {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
             AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 #endif
 
@@ -334,7 +313,7 @@ namespace Unity.Collections {
         /// </summary>
         public bool TryPop(out T t) {
             unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 #endif
 
@@ -345,7 +324,7 @@ namespace Unity.Collections {
 
                 var rootNode = Data->Heap[0];
 
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                 //Update version to invalidate all existing handles
                 Data->Table[rootNode.TableIndex].Version++;
 #endif
@@ -379,7 +358,7 @@ namespace Unity.Collections {
         /// </summary>
         public NativeHeapIndex Insert(in T t) {
             unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 #endif
 
@@ -396,7 +375,7 @@ namespace Unity.Collections {
 
                 return new NativeHeapIndex() {
                     TableIndex = node.TableIndex,
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                     Version = Data->Table[node.TableIndex].Version,
                     StructureId = Id
 #endif
@@ -416,18 +395,16 @@ namespace Unity.Collections {
         /// </summary>
         public T Remove(NativeHeapIndex index) {
             unsafe {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 
-                if (!IsValidIndex(index, out string error)) {
-                    throw new ArgumentException(error);
-                }
+                AssertValidIndex(index);
 #endif
                 int indexToRemove = Data->Table[index.TableIndex].HeapIndex;
 
                 HeapNode<T> toRemove = Data->Heap[indexToRemove];
 
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                 Data->Table[toRemove.TableIndex].Version++;
 #endif
 
@@ -456,7 +433,11 @@ namespace Unity.Collections {
 
         #region IMPLEMENTATION
 
-#if NHEAP_SAFE
+        internal const int VALIDATION_ERROR_WRONG_INSTANCE = 1;
+        internal const int VALIDATION_ERROR_INVALID = 2;
+        internal const int VALIDATION_ERROR_REMOVED = 3;
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
         internal static int NextId = 1;
         internal int Id;
 
@@ -471,7 +452,7 @@ namespace Unity.Collections {
         internal Allocator Allocator;
 
         internal NativeHeap(int initialCapacity, U comparator, Allocator allocator, int disposeSentinelStackDepth) {
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
             if (initialCapacity <= 0) {
                 throw new ArgumentException(nameof(initialCapacity), "Must provide an initial capacity that is greater than zero.");
             }
@@ -497,7 +478,7 @@ namespace Unity.Collections {
                     Data->Heap[i] = new HeapNode<T>() {
                         TableIndex = i
                     };
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
                     Data->Table[i] = new TableValue() {
                         Version = 1
                     };
@@ -579,6 +560,31 @@ namespace Unity.Collections {
             }
         }
 
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        internal void IsValidIndexInternal(NativeHeapIndex index, ref bool result, ref int errorCode) {
+            unsafe {
+                AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+
+                if (index.StructureId != Id) {
+                    errorCode = VALIDATION_ERROR_WRONG_INSTANCE;
+                    result = false;
+                    return;
+                }
+
+                if (index.TableIndex >= Data->Capacity) {
+                    errorCode = VALIDATION_ERROR_INVALID;
+                    result = false;
+                    return;
+                }
+
+                TableValue tableValue = Data->Table[index.TableIndex];
+                if (tableValue.Version != index.Version) {
+                    errorCode = VALIDATION_ERROR_REMOVED;
+                    result = false;
+                    return;
+                }
+            }
+        }
 
         #endregion
     }
@@ -613,7 +619,7 @@ namespace Unity.Collections {
     [StructLayout(LayoutKind.Sequential)]
     internal struct TableValue {
         public int HeapIndex;
-#if NHEAP_SAFE
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
         public int Version;
 #endif
     }

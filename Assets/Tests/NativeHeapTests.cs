@@ -1,4 +1,5 @@
 ﻿using System.Linq;
+using System.Diagnostics;
 using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
@@ -191,9 +192,16 @@ namespace Tests {
         }
 
         private void InconclusiveIfNoSafety() {
-            if (!NativeHeap<int, Min>.IsUsingSafetyChecks) {
+            bool isOn = false;
+            CheckSafetyChecks(ref isOn);
+            if (!isOn) {
                 Assert.Inconclusive("This test requires safety checks");
             }
+        }
+
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private void CheckSafetyChecks(ref bool isOn) {
+            isOn = true;
         }
     }
 }
