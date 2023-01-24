@@ -95,15 +95,15 @@ namespace Unity.Collections {
 
                     for (int i = 0; i < value - Data->Capacity; i++) {
                         //For each new heap node, make sure that it has a new unique index
-                        WriteArrayElement(newHeap, i + Data->Capacity, new HeapNode<T>() {
+                        newHeap[i + Data->Capacity] = new HeapNode<T>() {
                             TableIndex = i + Data->Capacity
-                        });
+                        };
 
 #if NHEAP_SAFE
                         //For each new table value, make sure it has a specific version
-                        WriteArrayElement(newTable, i + Data->Capacity, new TableValue() {
+                        newTable[i + Data->Capacity] = new TableValue() {
                             Version = 1
-                        });
+                        };
 #endif
                     }
 
@@ -175,7 +175,7 @@ namespace Unity.Collections {
         /// always return the smallest element according to the ordering specified by this comparator.
         /// </param>
         public NativeHeap(Allocator allocator, int initialCapacity = DEFAULT_CAPACITY, U comparator = default) :
-            this(initialCapacity, comparator, allocator, 1) { }
+            this(initialCapacity, comparator, allocator, disposeSentinelStackDepth: 1) { }
 
         /// <summary>
         /// Disposes of this container and deallocates its memory immediately.
@@ -207,7 +207,7 @@ namespace Unity.Collections {
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 
                 for (int i = 0; i < Data->Count; i++) {
-                    var node = ReadArrayElement<HeapNode<T>>(Data->Heap, i);
+                    var node = Data->Heap[i];
                     Data->Table[node.TableIndex].Version++;
                 }
 #endif
@@ -299,7 +299,7 @@ namespace Unity.Collections {
                     return false;
                 } else {
                     unsafe {
-                        CopyPtrToStructure(Data->Heap, out t);
+                        t = Data->Heap[0].Item;
                         return true;
                     }
                 }
@@ -343,7 +343,7 @@ namespace Unity.Collections {
                     return false;
                 }
 
-                var rootNode = ReadArrayElement<HeapNode<T>>(Data->Heap, 0);
+                var rootNode = Data->Heap[0];
 
 #if NHEAP_SAFE
                 //Update version to invalidate all existing handles
@@ -352,10 +352,10 @@ namespace Unity.Collections {
 
                 //Grab the last node off the end and remove it
                 int lastNodeIndex = --Data->Count;
-                var lastNode = ReadArrayElement<HeapNode<T>>(Data->Heap, lastNodeIndex);
+                var lastNode = Data->Heap[lastNodeIndex];
 
                 //Move the previous root to the end of the array to fill the space we just made
-                WriteArrayElement(Data->Heap, lastNodeIndex, rootNode);
+                Data->Heap[lastNodeIndex] = rootNode;
 
                 //Finally insert the previously last node at the root and bubble it down
                 InsertAndBubbleDown(lastNode, 0);
@@ -387,7 +387,7 @@ namespace Unity.Collections {
                     Capacity *= 2;
                 }
 
-                var node = ReadArrayElement<HeapNode<T>>(Data->Heap, Data->Count);
+                var node = Data->Heap[Data->Count];
                 node.Item = t;
 
                 var insertIndex = Data->Count++;
@@ -425,20 +425,20 @@ namespace Unity.Collections {
 #endif
                 int indexToRemove = Data->Table[index.TableIndex].HeapIndex;
 
-                HeapNode<T> toRemove = ReadArrayElement<HeapNode<T>>(Data->Heap, indexToRemove);
+                HeapNode<T> toRemove = Data->Heap[indexToRemove];
 
 #if NHEAP_SAFE
                 Data->Table[toRemove.TableIndex].Version++;
 #endif
 
-                HeapNode<T> lastNode = ReadArrayElement<HeapNode<T>>(Data->Heap, --Data->Count);
+                HeapNode<T> lastNode = Data->Heap[--Data->Count];
 
                 //First we move the node to remove to the end of the heap
                 WriteArrayElement(Data->Heap, Data->Count, toRemove);
 
                 if (indexToRemove != 0) {
                     int parentIndex = (indexToRemove - 1) / 2;
-                    var parentNode = ReadArrayElement<HeapNode<T>>(Data->Heap, parentIndex);
+                    var parentNode = Data->Heap[parentIndex];
                     if (Data->Comparator.Compare(lastNode.Item, parentNode.Item) < 0) {
                         InsertAndBubbleUp(lastNode, indexToRemove);
                         return toRemove.Item;
@@ -494,13 +494,13 @@ namespace Unity.Collections {
                 Allocator = allocator;
 
                 for (int i = 0; i < initialCapacity; i++) {
-                    WriteArrayElement(Data->Heap, i, new HeapNode<T>() {
+                    Data->Heap[i] = new HeapNode<T>() {
                         TableIndex = i
-                    });
+                    };
 #if NHEAP_SAFE
-                    WriteArrayElement(Data->Table, i, new TableValue() {
+                    Data->Table[i] = new TableValue() {
                         Version = 1
-                    });
+                    };
 #endif
                 }
 
@@ -521,35 +521,35 @@ namespace Unity.Collections {
                         break;
                     }
 
-                    if (indexR >= Data->Count || Data->Comparator.Compare(ReadArrayElement<HeapNode<T>>(Data->Heap, indexL).Item,
-                                                                      ReadArrayElement<HeapNode<T>>(Data->Heap, indexR).Item) <= 0) {
+                    if (indexR >= Data->Count || Data->Comparator.Compare(Data->Heap[indexL].Item,
+                                                                          Data->Heap[indexR].Item) <= 0) {
                         //left is smaller (or the only child)
-                        var leftNode = ReadArrayElement<HeapNode<T>>(Data->Heap, indexL);
+                        var leftNode = Data->Heap[indexL];
 
                         if (Data->Comparator.Compare(node.Item, leftNode.Item) <= 0) {
                             //Last is smaller or equal to left, we are done
                             break;
                         }
 
-                        WriteArrayElement(Data->Heap, insertIndex, leftNode);
+                        Data->Heap[insertIndex] = leftNode;
                         Data->Table[leftNode.TableIndex].HeapIndex = insertIndex;
                         insertIndex = indexL;
                     } else {
                         //right is smaller
-                        var rightNode = ReadArrayElement<HeapNode<T>>(Data->Heap, indexR);
+                        var rightNode = Data->Heap[indexR];
 
                         if (Data->Comparator.Compare(node.Item, rightNode.Item) <= 0) {
                             //Last is smaller than or equal to right, we are done
                             break;
                         }
 
-                        WriteArrayElement(Data->Heap, insertIndex, rightNode);
+                        Data->Heap[insertIndex] = rightNode;
                         Data->Table[rightNode.TableIndex].HeapIndex = insertIndex;
                         insertIndex = indexR;
                     }
                 }
 
-                WriteArrayElement(Data->Heap, insertIndex, node);
+                Data->Heap[insertIndex] = node;
                 Data->Table[node.TableIndex].HeapIndex = insertIndex;
             }
         }
@@ -558,7 +558,7 @@ namespace Unity.Collections {
             unsafe {
                 while (insertIndex != 0) {
                     int parentIndex = (insertIndex - 1) / 2;
-                    var parentNode = ReadArrayElement<HeapNode<T>>(Data->Heap, parentIndex);
+                    var parentNode = Data->Heap[parentIndex];
 
                     //If parent is actually less or equal to us, we are ok and can break out
                     if (Data->Comparator.Compare(parentNode.Item, node.Item) <= 0) {
@@ -566,7 +566,7 @@ namespace Unity.Collections {
                     }
 
                     //We need to swap parent down
-                    WriteArrayElement(Data->Heap, insertIndex, parentNode);
+                    Data->Heap[insertIndex] = parentNode;
                     //Update table to point to new heap index
                     Data->Table[parentNode.TableIndex].HeapIndex = insertIndex;
 
@@ -574,7 +574,7 @@ namespace Unity.Collections {
                     insertIndex = parentIndex;
                 }
 
-                WriteArrayElement(Data->Heap, insertIndex, node);
+                Data->Heap[insertIndex] = node;
                 Data->Table[node.TableIndex].HeapIndex = insertIndex;
             }
         }
