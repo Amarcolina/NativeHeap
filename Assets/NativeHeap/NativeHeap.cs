@@ -42,6 +42,7 @@ namespace Unity.Collections {
     /// </summary>
     [NativeContainer]
     [DebuggerDisplay("Count = {Count}")]
+    [DebuggerTypeProxy(typeof(NativeHeapDebugView<,>))]
     [StructLayout(LayoutKind.Sequential)]
     public struct NativeHeap<T, U> : IDisposable
         where T : unmanaged
@@ -74,45 +75,45 @@ namespace Unity.Collections {
 #if NHEAP_SAFE
                     AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
-                    return _data->Capacity;
+                    return Data->Capacity;
                 }
             }
             set {
                 unsafe {
 #if NHEAP_SAFE
                     AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
-                    if (value < _data->Count) {
-                        throw new ArgumentException($"Capacity of {value} cannot be smaller than count of {_data->Count}.");
+                    if (value < Data->Count) {
+                        throw new ArgumentException($"Capacity of {value} cannot be smaller than count of {Data->Count}.");
                     }
 #endif
-                    TableValue* newTable = (TableValue*)Malloc(SizeOf<TableValue>() * value, AlignOf<TableValue>(), _allocator);
-                    void* newHeap = Malloc(SizeOf<HeapNode>() * value, AlignOf<HeapNode>(), _allocator);
+                    TableValue* newTable = (TableValue*)Malloc(SizeOf<TableValue>() * value, AlignOf<TableValue>(), Allocator);
+                    HeapNode<T>* newHeap = (HeapNode<T>*)Malloc(SizeOf<HeapNode<T>>() * value, AlignOf<HeapNode<T>>(), Allocator);
 
-                    int toCopy = _data->Capacity < value ? _data->Capacity : value;
-                    MemCpy(newTable, _data->Table, toCopy * SizeOf<TableValue>());
-                    MemCpy(newHeap, _data->Heap, toCopy * SizeOf<HeapNode>());
+                    int toCopy = Data->Capacity < value ? Data->Capacity : value;
+                    MemCpy(newTable, Data->Table, toCopy * SizeOf<TableValue>());
+                    MemCpy(newHeap, Data->Heap, toCopy * SizeOf<HeapNode<T>>());
 
-                    for (int i = 0; i < value - _data->Capacity; i++) {
+                    for (int i = 0; i < value - Data->Capacity; i++) {
                         //For each new heap node, make sure that it has a new unique index
-                        WriteArrayElement(newHeap, i + _data->Capacity, new HeapNode() {
-                            TableIndex = i + _data->Capacity
+                        WriteArrayElement(newHeap, i + Data->Capacity, new HeapNode<T>() {
+                            TableIndex = i + Data->Capacity
                         });
 
 #if NHEAP_SAFE
                         //For each new table value, make sure it has a specific version
-                        WriteArrayElement(newTable, i + _data->Capacity, new TableValue() {
+                        WriteArrayElement(newTable, i + Data->Capacity, new TableValue() {
                             Version = 1
                         });
 #endif
                     }
 
-                    Free(_data->Table, _allocator);
-                    Free(_data->Heap, _allocator);
+                    Free(Data->Table, Allocator);
+                    Free(Data->Heap, Allocator);
 
-                    _data->Table = newTable;
-                    _data->Heap = newHeap;
+                    Data->Table = newTable;
+                    Data->Heap = newHeap;
 
-                    _data->Capacity = value;
+                    Data->Capacity = value;
                 }
             }
         }
@@ -126,7 +127,7 @@ namespace Unity.Collections {
 #if NHEAP_SAFE
                     AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
-                    return _data->Count;
+                    return Data->Count;
                 }
             }
         }
@@ -141,7 +142,7 @@ namespace Unity.Collections {
 #if NHEAP_SAFE
                     AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
-                    return _data->Comparator;
+                    return Data->Comparator;
                 }
             }
             set {
@@ -149,11 +150,11 @@ namespace Unity.Collections {
 #if NHEAP_SAFE
                     AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 
-                    if (_data->Count != 0) {
+                    if (Data->Count != 0) {
                         throw new InvalidOperationException("Can only change the comparator of a NativeHeap when it is empty.");
                     }
 #endif
-                    _data->Comparator = value;
+                    Data->Comparator = value;
                 }
             }
         }
@@ -187,12 +188,12 @@ namespace Unity.Collections {
                 DisposeSentinel.Dispose(ref m_Safety, ref m_DisposeSentinel);
 #endif
 
-                _data->Count = 0;
-                _data->Capacity = 0;
+                Data->Count = 0;
+                Data->Capacity = 0;
 
-                Free(_data->Heap, _allocator);
-                Free(_data->Table, _allocator);
-                Free(_data, _allocator);
+                Free(Data->Heap, Allocator);
+                Free(Data->Table, Allocator);
+                Free(Data, Allocator);
             }
         }
 
@@ -205,13 +206,13 @@ namespace Unity.Collections {
 #if NHEAP_SAFE
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 
-                for (int i = 0; i < _data->Count; i++) {
-                    var node = ReadArrayElement<HeapNode>(_data->Heap, i);
-                    _data->Table[node.TableIndex].Version++;
+                for (int i = 0; i < Data->Count; i++) {
+                    var node = ReadArrayElement<HeapNode<T>>(Data->Heap, i);
+                    Data->Table[node.TableIndex].Version++;
                 }
 #endif
 
-                _data->Count = 0;
+                Data->Count = 0;
             }
         }
 
@@ -238,17 +239,17 @@ namespace Unity.Collections {
             unsafe {
                 AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 
-                if (index.StructureId != _id) {
+                if (index.StructureId != Id) {
                     error = "The provided ItemHandle was not valid for this NativeHeap.  It was taken from a different instance.";
                     return false;
                 }
 
-                if (index.TableIndex >= _data->Capacity) {
+                if (index.TableIndex >= Data->Capacity) {
                     error = "The provided ItemHandle was not valid for this NativeHeap.";
                     return false;
                 }
 
-                TableValue tableValue = _data->Table[index.TableIndex];
+                TableValue tableValue = Data->Table[index.TableIndex];
                 if (tableValue.Version != index.Version) {
                     error = "The provided ItemHandle was not valid for this NativeHeap.  The item it pointed to might have already been removed.";
                     return false;
@@ -293,12 +294,12 @@ namespace Unity.Collections {
                 AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
 
-                if (_data->Count == 0) {
+                if (Data->Count == 0) {
                     t = default;
                     return false;
                 } else {
                     unsafe {
-                        CopyPtrToStructure(_data->Heap, out t);
+                        CopyPtrToStructure(Data->Heap, out t);
                         return true;
                     }
                 }
@@ -337,24 +338,24 @@ namespace Unity.Collections {
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 #endif
 
-                if (_data->Count == 0) {
+                if (Data->Count == 0) {
                     t = default;
                     return false;
                 }
 
-                var rootNode = ReadArrayElement<HeapNode>(_data->Heap, 0);
+                var rootNode = ReadArrayElement<HeapNode<T>>(Data->Heap, 0);
 
 #if NHEAP_SAFE
                 //Update version to invalidate all existing handles
-                _data->Table[rootNode.TableIndex].Version++;
+                Data->Table[rootNode.TableIndex].Version++;
 #endif
 
                 //Grab the last node off the end and remove it
-                int lastNodeIndex = --_data->Count;
-                var lastNode = ReadArrayElement<HeapNode>(_data->Heap, lastNodeIndex);
+                int lastNodeIndex = --Data->Count;
+                var lastNode = ReadArrayElement<HeapNode<T>>(Data->Heap, lastNodeIndex);
 
                 //Move the previous root to the end of the array to fill the space we just made
-                WriteArrayElement(_data->Heap, lastNodeIndex, rootNode);
+                WriteArrayElement(Data->Heap, lastNodeIndex, rootNode);
 
                 //Finally insert the previously last node at the root and bubble it down
                 InsertAndBubbleDown(lastNode, 0);
@@ -382,22 +383,22 @@ namespace Unity.Collections {
                 AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
 #endif
 
-                if (_data->Count == _data->Capacity) {
+                if (Data->Count == Data->Capacity) {
                     Capacity *= 2;
                 }
 
-                var node = ReadArrayElement<HeapNode>(_data->Heap, _data->Count);
+                var node = ReadArrayElement<HeapNode<T>>(Data->Heap, Data->Count);
                 node.Item = t;
 
-                var insertIndex = _data->Count++;
+                var insertIndex = Data->Count++;
 
                 InsertAndBubbleUp(node, insertIndex);
 
                 return new NativeHeapIndex() {
                     TableIndex = node.TableIndex,
 #if NHEAP_SAFE
-                    Version = _data->Table[node.TableIndex].Version,
-                    StructureId = _id
+                    Version = Data->Table[node.TableIndex].Version,
+                    StructureId = Id
 #endif
                 };
             }
@@ -422,23 +423,23 @@ namespace Unity.Collections {
                     throw new ArgumentException(error);
                 }
 #endif
-                int indexToRemove = _data->Table[index.TableIndex].HeapIndex;
+                int indexToRemove = Data->Table[index.TableIndex].HeapIndex;
 
-                HeapNode toRemove = ReadArrayElement<HeapNode>(_data->Heap, indexToRemove);
+                HeapNode<T> toRemove = ReadArrayElement<HeapNode<T>>(Data->Heap, indexToRemove);
 
 #if NHEAP_SAFE
-                _data->Table[toRemove.TableIndex].Version++;
+                Data->Table[toRemove.TableIndex].Version++;
 #endif
 
-                HeapNode lastNode = ReadArrayElement<HeapNode>(_data->Heap, --_data->Count);
+                HeapNode<T> lastNode = ReadArrayElement<HeapNode<T>>(Data->Heap, --Data->Count);
 
                 //First we move the node to remove to the end of the heap
-                WriteArrayElement(_data->Heap, _data->Count, toRemove);
+                WriteArrayElement(Data->Heap, Data->Count, toRemove);
 
                 if (indexToRemove != 0) {
                     int parentIndex = (indexToRemove - 1) / 2;
-                    var parentNode = ReadArrayElement<HeapNode>(_data->Heap, parentIndex);
-                    if (_data->Comparator.Compare(lastNode.Item, parentNode.Item) < 0) {
+                    var parentNode = ReadArrayElement<HeapNode<T>>(Data->Heap, parentIndex);
+                    if (Data->Comparator.Compare(lastNode.Item, parentNode.Item) < 0) {
                         InsertAndBubbleUp(lastNode, indexToRemove);
                         return toRemove.Item;
                     }
@@ -456,8 +457,8 @@ namespace Unity.Collections {
         #region IMPLEMENTATION
 
 #if NHEAP_SAFE
-        private static int _nextId = 1;
-        private int _id;
+        internal static int NextId = 1;
+        internal int Id;
 
         internal AtomicSafetyHandle m_Safety;
 
@@ -466,8 +467,8 @@ namespace Unity.Collections {
 #endif
 
         [NativeDisableUnsafePtrRestriction]
-        private unsafe HeapData<U>* _data;
-        private Allocator _allocator;
+        internal unsafe HeapData<T, U>* Data;
+        internal Allocator Allocator;
 
         internal NativeHeap(int initialCapacity, U comparator, Allocator allocator, int disposeSentinelStackDepth) {
 #if NHEAP_SAFE
@@ -482,108 +483,131 @@ namespace Unity.Collections {
             }
 
             DisposeSentinel.Create(out m_Safety, out m_DisposeSentinel, disposeSentinelStackDepth, allocator);
-            _id = Interlocked.Increment(ref _nextId);
+            Id = Interlocked.Increment(ref NextId);
 #endif
 
             unsafe {
-                _data = (HeapData<U>*)Malloc(SizeOf<HeapData<U>>(), AlignOf<HeapData<U>>(), allocator);
-                _data->Heap = (void*)Malloc(SizeOf<HeapNode>() * initialCapacity, AlignOf<HeapNode>(), allocator);
-                _data->Table = (TableValue*)Malloc(SizeOf<TableValue>() * initialCapacity, AlignOf<TableValue>(), allocator);
+                Data = (HeapData<T, U>*)Malloc(SizeOf<HeapData<T, U>>(), AlignOf<HeapData<T, U>>(), allocator);
+                Data->Heap = (HeapNode<T>*)Malloc(SizeOf<HeapNode<T>>() * initialCapacity, AlignOf<HeapNode<T>>(), allocator);
+                Data->Table = (TableValue*)Malloc(SizeOf<TableValue>() * initialCapacity, AlignOf<TableValue>(), allocator);
 
-                _allocator = allocator;
+                Allocator = allocator;
 
                 for (int i = 0; i < initialCapacity; i++) {
-                    WriteArrayElement(_data->Heap, i, new HeapNode() {
+                    WriteArrayElement(Data->Heap, i, new HeapNode<T>() {
                         TableIndex = i
                     });
 #if NHEAP_SAFE
-                    WriteArrayElement(_data->Table, i, new TableValue() {
+                    WriteArrayElement(Data->Table, i, new TableValue() {
                         Version = 1
                     });
 #endif
                 }
 
-                _data->Count = 0;
-                _data->Capacity = initialCapacity;
-                _data->Comparator = comparator;
+                Data->Count = 0;
+                Data->Capacity = initialCapacity;
+                Data->Comparator = comparator;
             }
         }
 
-        private void InsertAndBubbleDown(HeapNode node, int insertIndex) {
+        internal void InsertAndBubbleDown(HeapNode<T> node, int insertIndex) {
             unsafe {
                 while (true) {
                     int indexL = insertIndex * 2 + 1;
                     int indexR = insertIndex * 2 + 2;
 
                     //If the left index is off the end, we are finished
-                    if (indexL >= _data->Count) {
+                    if (indexL >= Data->Count) {
                         break;
                     }
 
-                    if (indexR >= _data->Count || _data->Comparator.Compare(ReadArrayElement<HeapNode>(_data->Heap, indexL).Item,
-                                                                      ReadArrayElement<HeapNode>(_data->Heap, indexR).Item) <= 0) {
+                    if (indexR >= Data->Count || Data->Comparator.Compare(ReadArrayElement<HeapNode<T>>(Data->Heap, indexL).Item,
+                                                                      ReadArrayElement<HeapNode<T>>(Data->Heap, indexR).Item) <= 0) {
                         //left is smaller (or the only child)
-                        var leftNode = ReadArrayElement<HeapNode>(_data->Heap, indexL);
+                        var leftNode = ReadArrayElement<HeapNode<T>>(Data->Heap, indexL);
 
-                        if (_data->Comparator.Compare(node.Item, leftNode.Item) <= 0) {
+                        if (Data->Comparator.Compare(node.Item, leftNode.Item) <= 0) {
                             //Last is smaller or equal to left, we are done
                             break;
                         }
 
-                        WriteArrayElement(_data->Heap, insertIndex, leftNode);
-                        _data->Table[leftNode.TableIndex].HeapIndex = insertIndex;
+                        WriteArrayElement(Data->Heap, insertIndex, leftNode);
+                        Data->Table[leftNode.TableIndex].HeapIndex = insertIndex;
                         insertIndex = indexL;
                     } else {
                         //right is smaller
-                        var rightNode = ReadArrayElement<HeapNode>(_data->Heap, indexR);
+                        var rightNode = ReadArrayElement<HeapNode<T>>(Data->Heap, indexR);
 
-                        if (_data->Comparator.Compare(node.Item, rightNode.Item) <= 0) {
+                        if (Data->Comparator.Compare(node.Item, rightNode.Item) <= 0) {
                             //Last is smaller than or equal to right, we are done
                             break;
                         }
 
-                        WriteArrayElement(_data->Heap, insertIndex, rightNode);
-                        _data->Table[rightNode.TableIndex].HeapIndex = insertIndex;
+                        WriteArrayElement(Data->Heap, insertIndex, rightNode);
+                        Data->Table[rightNode.TableIndex].HeapIndex = insertIndex;
                         insertIndex = indexR;
                     }
                 }
 
-                WriteArrayElement(_data->Heap, insertIndex, node);
-                _data->Table[node.TableIndex].HeapIndex = insertIndex;
+                WriteArrayElement(Data->Heap, insertIndex, node);
+                Data->Table[node.TableIndex].HeapIndex = insertIndex;
             }
         }
 
-        private void InsertAndBubbleUp(HeapNode node, int insertIndex) {
+        internal void InsertAndBubbleUp(HeapNode<T> node, int insertIndex) {
             unsafe {
                 while (insertIndex != 0) {
                     int parentIndex = (insertIndex - 1) / 2;
-                    var parentNode = ReadArrayElement<HeapNode>(_data->Heap, parentIndex);
+                    var parentNode = ReadArrayElement<HeapNode<T>>(Data->Heap, parentIndex);
 
                     //If parent is actually less or equal to us, we are ok and can break out
-                    if (_data->Comparator.Compare(parentNode.Item, node.Item) <= 0) {
+                    if (Data->Comparator.Compare(parentNode.Item, node.Item) <= 0) {
                         break;
                     }
 
                     //We need to swap parent down
-                    WriteArrayElement(_data->Heap, insertIndex, parentNode);
+                    WriteArrayElement(Data->Heap, insertIndex, parentNode);
                     //Update table to point to new heap index
-                    _data->Table[parentNode.TableIndex].HeapIndex = insertIndex;
+                    Data->Table[parentNode.TableIndex].HeapIndex = insertIndex;
 
                     //Restart loop trying to insert at parent index
                     insertIndex = parentIndex;
                 }
 
-                WriteArrayElement(_data->Heap, insertIndex, node);
-                _data->Table[node.TableIndex].HeapIndex = insertIndex;
+                WriteArrayElement(Data->Heap, insertIndex, node);
+                Data->Table[node.TableIndex].HeapIndex = insertIndex;
             }
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        internal struct HeapNode {
-            public T Item;
-            public int TableIndex;
-        }
+
         #endregion
+    }
+
+    internal class NativeHeapDebugView<T, U>
+        where T : unmanaged
+        where U : unmanaged, IComparer<T> {
+
+        private NativeHeap<T, U> _heap;
+
+        public NativeHeapDebugView(NativeHeap<T, U> heap) {
+            _heap = heap;
+        }
+
+        public int Count => _heap.Count;
+        public int Capacity => _heap.Capacity;
+        public U Comparator => _heap.Comparator;
+
+        public T[] Items {
+            get {
+                T[] items = new T[_heap.Count];
+                for (int i = 0; i < items.Length; i++) {
+                    unsafe {
+                        items[i] = _heap.Data->Heap[i].Item;
+                    }
+                }
+                return items;
+            }
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -595,11 +619,19 @@ namespace Unity.Collections {
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct HeapData<U> {
+    internal struct HeapData<T, U>
+        where T : unmanaged {
         public int Count;
         public int Capacity;
-        public unsafe void* Heap;
+        public unsafe HeapNode<T>* Heap;
         public unsafe TableValue* Table;
         public U Comparator;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct HeapNode<T>
+        where T : unmanaged {
+        public T Item;
+        public int TableIndex;
     }
 }
